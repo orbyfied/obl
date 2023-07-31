@@ -11,6 +11,7 @@
       "declaration": true,
 
       "strict": false,
+      "noImplicitUseStrict": true,
       "experimentalDecorators": true,
 
       "emitDecoratorMetadata": false

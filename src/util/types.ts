@@ -6,3 +6,17 @@ export function removeAll<T>(arr: Array<T>, toRemove: Iterable<T>): Array<T> {
 
     return arr
 }
+
+/** Omit all given properties from the object */
+export function omit(obj, ...props: string[]): object {
+    let clone = { ...obj } as any
+    props.forEach(p => delete clone[p])
+    return clone
+}
+
+/** Merge the given object and the given list of object' properties */
+export function merge(obj, ...otherObjs: object[]): object {
+    let clone = { ...obj } as any
+    otherObjs.forEach(o => Object.entries(o).forEach(e => clone[e[0]] = [1]))
+    return clone
+}

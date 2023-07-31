@@ -1,10 +1,9 @@
 import { BotService, ServiceManager, autoRegister, eventHandler } from "../services";
 import { Logger } from "../util/logging";
-import { MongoClient, Collection, Filter, Db } from 'mongodb'
-import { Document } from "bson";
 import { Optional } from "../util/optional";
 import { AsyncQueue, QueuedOperation, qp } from "../util/functional";
 import { EventEmitter } from "events";
+import { Document } from 'bson'
 
 // The logger instance
 let logger: Logger
@@ -34,6 +33,16 @@ export abstract class MappingSchema<TSrc, T> extends Schema<T> {
     abstract toSrc(val: T): TSrc
 }
 
+/** Represents a schema dynamically mapping TSrc to T */
+export abstract class DynamicMappingSchema<TSrc, T> extends MappingSchema<TSrc, T> {
+    
+}
+
+/** Represents a schema which must always conform to a specific structure */
+export abstract class StaticSchema<T> extends MappingSchema<object, T> {
+
+}
+
 /** Annotates the given property to be serialized */
 export function serialize() {
     return function(target: object, propertyKey: string) {
@@ -56,7 +65,7 @@ export function primaryKey() {
 }
 
 /** Create a document direct mapping */
-export function bsonDocumentDirectMap<T>(proto: object, factory: () => T): MappingSchema<Document, T> {
+export function bsonDocumentDirectMap<T>(proto: object, factory: () => T): DynamicMappingSchema<Document, T> {
     // calculate properties
     let properties: any[] = proto["___serialize_properties"]
     if (!properties)
@@ -69,7 +78,7 @@ export function bsonDocumentDirectMap<T>(proto: object, factory: () => T): Mappi
     let primaryKeyProperty: string = primaryKey.key
     
     // create mapping schema
-    return new class extends MappingSchema<Document, T> {
+    return new class extends DynamicMappingSchema<Document, T> {
         primaryKeyField(): string {
             return primaryKeyProperty
         }
@@ -116,6 +125,9 @@ export abstract class Table<T> {
     /** Find one object by the given query */
     abstract findOne(query: any): Promise<T>
 
+    /** Create a default schema for the given prototype */
+    abstract defaultSchemaFor(proto: object, factory: () => any)
+
     /** Get the current schema of this table */
     public schema(): Schema<T> {
         return null
@@ -124,6 +136,12 @@ export abstract class Table<T> {
     /** Create a new mapped table with the given schema */
     public mapped<T1>(schema: MappingSchema<T, T1>): Table<T1> {
         return new MappingSchemaTable(this, schema)
+    }
+
+    /** Create a new mapped table with the default schema for the
+     *  given prototype. */
+    public mappedFor<T1>(proto: object, factory: () => T1): Table<T1> {
+        return this.mapped<T1>(this.defaultSchemaFor(proto, factory))
     }
 
     /** Create a datastore for this table */
@@ -140,9 +158,9 @@ export abstract class Table<T> {
 // delegating to another table
 class MappingSchemaTable<TSrc, T> extends Table<T> {
     _base: Table<TSrc>              // The source table
-    _schema: MappingSchema<TSrc, T> // The schema
+    _schema: DynamicMappingSchema<TSrc, T> // The schema
 
-    constructor(base: Table<TSrc>, schema: MappingSchema<TSrc, T>) {
+    constructor(base: Table<TSrc>, schema: DynamicMappingSchema<TSrc, T>) {
         super()
         this._base = base
         this._schema = schema
@@ -175,6 +193,10 @@ class MappingSchemaTable<TSrc, T> extends Table<T> {
     findOne(query: any): Promise<T> {
         return this._base.findOne(query).then(src => this._schema.fromSrc(src))
     }
+
+    defaultSchemaFor(proto: object, factory: () => any) {
+        return this._base.defaultSchemaFor(proto, factory)
+    }
 }
 
 /** Represents a database connection */
@@ -184,10 +206,10 @@ export abstract class Database<TDefaultDoc> {
 }
 
 /** Represents a connection to a database list/provider */
-export abstract class DatabaseProvider<TDb extends Database<any>> {
+export abstract class DatabaseProvider<TDb extends Promise<Database<any>> | Database<any>> {
 
     /** Connect the database provider */
-    abstract connect(): Promise<DatabaseProvider<TDb>>
+    abstract connect(): Promise<this>
 
     /** Get or create a database with the given name */
     abstract db(name: string): TDb
@@ -390,114 +412,3 @@ export type UpdateOptions = { upsert: boolean }
 export type Acknowledgable = { acknowleged: boolean,  }
 export type UpdateResult = Acknowledgable & { modified: number, matched: number, upserted: number }
 export type DeleteResult = Acknowledgable & { deleted: number }
-
-/* ----------------- MongoDB Implementation ----------------- */
-export class MongoDatabaseProvider extends DatabaseProvider<MongoDatabase> {
-    public static with(connectionStr: string): DatabaseProvider<MongoDatabase> {
-        let provider = new MongoDatabaseProvider()
-        provider.connectionString = connectionStr
-        provider.client = new MongoClient(connectionStr)
-        return provider
-    }
-
-    connectionString: string                        // The connection string
-    client: MongoClient                             // The MongoDB client if connected
-    dbCache: Map<string, MongoDatabase> = new Map() // The cache of database instances
-
-    async connect(): Promise<DatabaseProvider<MongoDatabase>> {
-        return this.client.connect().then(_ => this)
-    }
-
-    db(name: string): MongoDatabase {
-        let db: MongoDatabase
-        if (db = this.dbCache.get(name)) {
-            return db
-        }
-
-        this.dbCache.set(name, db = new MongoDatabase(this, this.client.db(name)))
-        return db
-    }
-}
-
-export class MongoDatabase extends Database<Document> {
-    provider: MongoDatabaseProvider                 // The database provider
-    database: Db                                    // The MongoDB database instance
-    tableCache: Map<string, MongoTable> = new Map() // The cached table instances\
-
-    constructor(provider: MongoDatabaseProvider, database: Db) {
-        super()
-        this.provider = provider
-        this.database = database
-    }
-
-    /** Get a table by name */
-    public table(name: string): Table<Document> {
-        let table: MongoTable
-        if (table = this.tableCache.get(name)) {
-            return table
-        }
-
-        this.tableCache.set(name, table = new MongoTable(name, this))
-        return table
-    }
-}
-
-export class MongoTable extends Table<Document> {
-    constructor(name: string, db: MongoDatabase) {
-        super()
-        this.tName = name
-        this.db = db
-
-        this.collection = db.database.collection(this.tName)
-    }
-
-    tName: string                    // The name of this collection
-    db: MongoDatabase                // The MongoDB database
-    collection: Collection<Document> // The internal MongoDB collection
-
-    // build the mongo filter from the given filter
-    private buildMongoFilter(filter: any): Filter<Document> {
-        // todo
-        return filter
-    }
-
-    name(): string {
-        return this.tName
-    }
-
-    orCreate(): Promise<Table<Document>> {
-        return new Promise((resolve, reject) => {
-            if (this.collection) {
-                resolve(this)
-                return
-            }
-
-            if (this.collection = this.db.database.collection(this.name())) {
-                resolve(this)
-                return
-            }
-
-            this.db.database.createCollection(this.name()).then(v => {
-                this.collection = v
-                resolve(this)
-            })
-        })
-    }
-
-    insert(object: Document): Promise<Acknowledgable> {
-        return this.collection.insertOne(object).then<Acknowledgable>(v => ({ acknowleged: v.acknowledged }))
-    }
-
-    update(filter: any, object: Document, options: UpdateOptions): Promise<UpdateResult> {
-        return this.collection.updateOne(this.buildMongoFilter(filter), { "$set" : object }, { upsert: options.upsert })
-            .then(v => ({ acknowleged: v.acknowledged, modified: v.modifiedCount, matched: v.matchedCount, upserted: v.upsertedCount }))
-    }
-
-    delete(filter: any): Promise<DeleteResult> {
-        return this.collection.deleteMany(this.buildMongoFilter(filter)).then(r => ({ acknowleged: r.acknowledged, deleted: r.deletedCount }))
-    }
-
-    findOne(query: any): Promise<Document> {
-        return this.collection.findOne(this.buildMongoFilter(query))
-    }
-}

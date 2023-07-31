@@ -157,11 +157,6 @@ export function updateConfigSchema(template: object, actual: object): boolean {
     return changed
 }
 
-/** Stores information about a config file */
-export class ConfigInfo {
-
-}
-
 @autoRegister()
 export class ConfigService extends BotService {
 
