@@ -1,8 +1,9 @@
 import { BotService, ServiceManager, autoRegister, dependency, eventHandler, providedBy, provides } from "../services";
 import { CommandService } from "./command-service";
 import { DataIO, fileJsonIO } from "../util/io";
-import { Channel, Client, ClientEvents, EmbedBuilder, Emoji, EmojiIdentifierResolvable, EmojiResolvable, Guild, GuildMember, Message, MessageReaction, PartialMessage, PartialMessageReaction, ReactionEmoji, Role, TextBasedChannel, User } from "discord.js";
+import { Channel, Client, ClientEvents, EmbedBuilder, Emoji, EmojiIdentifierResolvable, EmojiResolvable, GatewayIntentBits, Guild, GuildMember, Message, MessageReaction, PartialMessage, PartialMessageReaction, ReactionEmoji, Role, TextBasedChannel, User } from "discord.js";
 import { Logger } from "../util/logging";
+import { requiresDiscordIntents } from "../bootstrap";
 
 /** Context for serializing interaction components */
 export interface InteractionSerializationLogic {

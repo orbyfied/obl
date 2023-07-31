@@ -1,4 +1,4 @@
-import { BaseMessageOptions, Client, EmbedBuilder, Events, Guild, GuildChannel, GuildMember, Message, MessageCreateOptions, MessagePayload, MessageReplyOptions, PermissionResolvable, PermissionsBitField, TextBasedChannel, TextChannel, User } from "discord.js";
+import { BaseMessageOptions, Client, EmbedBuilder, Events, GatewayIntentBits, Guild, GuildChannel, GuildMember, Message, MessageCreateOptions, MessagePayload, MessageReplyOptions, PermissionResolvable, PermissionsBitField, TextBasedChannel, TextChannel, User } from "discord.js";
 import { BotService, ServiceManager, autoRegister, dependency, discordEventHandler, providedBy, provides } from "../services";
 import { Parser, StringReader, Parsers as ParsersBase, stringify, StringLoc, ParseError, EOS, ParseContext, epochTimeToSMS, UNTIL_NEWLN, StringBuilder, ParseResult, newSyncParser, newAsyncParser } from "../util/strings";
 import { Optional } from "../util/optional";
@@ -889,6 +889,7 @@ let logger: Logger
 
 @autoRegister()
 export class CommandService extends BotService {
+    readonly requiredDiscordIntents = [ GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers, GatewayIntentBits.Guilds ]
 
     @dependency(PermissionManager)
     permissionManager: PermissionManager

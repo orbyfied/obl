@@ -1,5 +1,5 @@
 /* Operational Imports */
-import { ActivityType, Client, ClientOptions, Events, GatewayIntentBits } from "discord.js"
+import { Client, ClientOptions, GatewayIntentBits } from "discord.js"
 import { Logger } from './util/logging';
 import { EventBus, ServiceManager } from "./services";
 import { openConsole } from './console';
@@ -75,6 +75,15 @@ export class OBLBootstrap {
     /** Create the client instance */
     public createClient(options?: ClientOptions): this {
         return this.then(_ => {
+            // collect gateway intents
+            let requiredIntents: Set<GatewayIntentBits> = new Set()
+            this.serviceManager.allServices().forEach(s => { if (s["requiredDiscordIntents"]) s["requiredDiscordIntents"].forEach(i => requiredIntents.add(i)) })
+            this.serviceManager.allModules().forEach(s => { if (s["requiredDiscordIntents"]) s["requiredDiscordIntents"].forEach(i => requiredIntents.add(i)) })
+
+            if (!options)
+                options = { intents: [] }
+            requiredIntents.forEach(b => options.intents["push"](b))
+            console.log(options.intents)
             this.client = new Client(options)
             this.client.once('ready', _ => {
                 logger.info("Connected to Discord as user({0}) userId({1})", this.client.user.username, this.client.user.id);

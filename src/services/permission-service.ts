@@ -1,4 +1,4 @@
-import { Client, GuildMember, Role } from "discord.js"
+import { Client, GatewayIntentBits, GuildMember, Role } from "discord.js"
 import { BotService, InjectStage, ServiceManager, autoRegister, dependency, discordEventHandler, eventHandler, providedBy, provides } from "../services"
 import { Result, pcallAsync } from "../util/result"
 import { DataIO, fileJsonIO } from "../util/io"
@@ -442,6 +442,8 @@ export class DiscordMemberPermissible extends GroupBasedPermissible {
 
 @autoRegister()
 export class PermissionService extends BotService {
+    readonly requiredDiscordIntents = [ GatewayIntentBits.GuildMembers ]
+
     @provides(PermissionManager)
     permissionManager: PermissionManager // The permission manager
 

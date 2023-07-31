@@ -16,7 +16,7 @@
 
 */
 
-import { Client, ClientEvents, Events } from "discord.js";
+import { ClientEvents } from "discord.js";
 import { Logger } from "./util/logging";
 import 'reflect-metadata'
 import './util/reflect'
@@ -80,7 +80,9 @@ export class ServiceManager {
     eventBus: EventBus = new EventBus() // The main event bus
 
     services: Object                    // All services by name
+    serviceList: BotService[] = []      // All services in an array
     modules: Object                     // All modules by name
+    moduleList: BotModule[] = []        // All modules in an array
     singletons: Object                  // Singleton Map for dependency injection
 
     gInjectCtx: InjectContext           // The injection context for the global variables
@@ -99,11 +101,13 @@ export class ServiceManager {
 
     addModule(module: BotModule): ServiceManager {
         this.modules[module.name] = module;
+        this.moduleList.push(module)
         return this
     }
 
     addService(service: BotService): ServiceManager {
         this.services[service.name] = service;
+        this.serviceList.push(service)
         return this
     }
 
@@ -116,12 +120,12 @@ export class ServiceManager {
         return this
     }
 
-    allServices() {
-        return this.services;
+    allServices(): BotService[] {
+        return this.serviceList
     }
 
-    allModules() {
-        return this.modules;
+    allModules(): BotModule[] {
+        return this.moduleList
     }
 
     /** Register all autoRegister annotated elements */
@@ -156,20 +160,20 @@ export class ServiceManager {
 
     /** On load, load everything */
     loadAll() {
-        callOnAll(this.services, s => s.load(this))
-        callOnAll(this.modules, s => s.load(this))
+        this.serviceList.forEach(s => s.load(this))
+        this.moduleList.forEach(s => s.load(this))
         injectDependencies(global, this, InjectStage.Load, this.gInjectCtx = new InjectContext()) 
 
         // post load
-        callOnAll(this.services, s => s.postLoad(this))
-        callOnAll(this.modules, s => s.postLoad(this))
+        this.serviceList.forEach(s => s.postLoad(this))
+        this.moduleList.forEach(s => s.postLoad(this))
         injectDependencies(global, this, InjectStage.PostLoad, this.gInjectCtx = new InjectContext()) 
     }
 
     /** On ready, ready everything */
     readyAll() {
-        callOnAll(this.services, s => s.ready(this))
-        callOnAll(this.modules, s => s.ready(this))
+        this.serviceList.forEach(s => s.ready(this))
+        this.moduleList.forEach(s => s.ready(this))
         injectDependencies(global, this, InjectStage.Ready, this.gInjectCtx = new InjectContext()) 
     }
 }
@@ -293,6 +297,8 @@ function injectDependencies(instance: Object, manager: ServiceManager, stage: st
         
         loadDependency(dependencyValue, manager)
         instance[property] = dependencyValue
+        if (dependencyValue["onInject"])
+            dependencyValue["onInject"](manager, instance, property)
     });
 }
 
@@ -419,8 +425,13 @@ export abstract class BaseService implements Keyed<string> {
      */
     onReady(manager: ServiceManager) { }
 
+    /**
+     * Called when this instance is injected into the given object.
+     */
+    onInject(manager: ServiceManager, into: object, property: string) { }
+
     protected abstract preLoad(manager: ServiceManager);
-    protected load(manager: ServiceManager) { 
+    public load(manager: ServiceManager) { 
         this.manager = manager
         if (this.loaded) return
 
@@ -443,7 +454,7 @@ export abstract class BaseService implements Keyed<string> {
         }
     }
 
-    protected postLoad(manager: ServiceManager) {
+    public postLoad(manager: ServiceManager) {
         try {
             // second round of dependency injection
             injectDependencies(this, manager, "postLoad", this.injectContext)
@@ -458,7 +469,7 @@ export abstract class BaseService implements Keyed<string> {
         }
     }
 
-    protected ready(manager: ServiceManager) {
+    public ready(manager: ServiceManager) {
         try {
             // final round of dependency injection
             injectDependencies(this, manager, "ready", this.injectContext)
