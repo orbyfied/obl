@@ -1,0 +1,9 @@
+# node.js
+/node_modules
+/build
+
+# data and configuration
+/data
+/config
+.env
+config.json
