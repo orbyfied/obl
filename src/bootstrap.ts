@@ -12,8 +12,18 @@ const fs = require("fs")
 // set up base logging
 const logger = new Logger("Main");
 
+export type BootstrapOptions = {
+    autoSaveInterval: number
+}
+
+const DEFAULT_OPTIONS: BootstrapOptions = {
+    autoSaveInterval: 1000 * 60 * 2 // 2 minutes
+}
+
 /** Bootstrapper class */
 export class OBLBootstrap {
+
+    readonly options: BootstrapOptions
 
     /** The service manager instance */
     public readonly serviceManager: ServiceManager = new ServiceManager()
@@ -26,13 +36,15 @@ export class OBLBootstrap {
 
     private currentPromise: Promise<any> = Promise.resolve() // The current promise being awaited
 
-    constructor() {
+    constructor(options: BootstrapOptions) {
+        this.options = options
+
         // set autosave interval
         setInterval(() => {
             this.eventBus.call("saveData", [{ 
-            reason: "autosave-interval" 
+                reason: "autosave-interval" 
             }])
-        }, 1000 * 60 * 2)
+        }, options.autoSaveInterval)
 
         // set exit hook
         process.on("exit", () => {
@@ -154,6 +166,6 @@ export class OBLBootstrap {
 }
 
 /** Creates a new bootstrap for OBL */
-export function bootstrap(): OBLBootstrap {
-    return new OBLBootstrap()
+export function bootstrap(options?: BootstrapOptions): OBLBootstrap {
+    return new OBLBootstrap(options ? options : DEFAULT_OPTIONS)
 }
