@@ -2,6 +2,7 @@
 /node_modules
 /build
 /dist
+/*.tgz
 
 # data and configuration
 /data
