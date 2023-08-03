@@ -6,7 +6,7 @@
       "moduleResolution": "Node",
       "sourceMap": true,
       "sourceRoot": "src",
-      "outDir": "build",
+      "outDir": "dist",
       "baseUrl": "src",
       "declaration": true,
 

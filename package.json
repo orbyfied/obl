@@ -2,14 +2,18 @@
     "name": "obl",
     "version": "1.0.0",
     "description": "ORBYFIED BOT LIBRARY",
-    "main": "src/index.ts",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
     "type": "commonjs",
     "scripts": {
-        "build": "rm -fr build && npx tsc",
+        "build": "rm -fr dist && npx tsc",
         "watch": "npx tsc -w",
         "test": "node --no-warnings build/index.js",
         "clean": "rm -fr build"
     },
+    "files": [
+        "dist"
+    ],
     "author": "orbyfied",
     "license": "ISC",
     "dependencies": {

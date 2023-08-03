@@ -1,13 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "fs"
 import path from "path"
 
-const { compilerOptions } = require("../../tsconfig.json")
-
-/** Get the name of the build dir */
-export function getBuildDir() {
-    return compilerOptions.outDir
-}
-
 /** Resolves the given path to something usable */
 export function resolvePath(pathStr: string) {
     return !path.isAbsolute(pathStr) ? path.join(process.cwd(), pathStr).replace("\\", "/") : pathStr

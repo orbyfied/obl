@@ -65,7 +65,7 @@ export function primaryKey() {
 }
 
 /** Create a document direct mapping */
-export function bsonDocumentDirectMap<T>(proto: object, factory: () => T): DynamicMappingSchema<Document, T> {
+export function documentDirectMap<T>(proto: object, factory: () => T): DynamicMappingSchema<Document, T> {
     // calculate properties
     let properties: any[] = proto["___serialize_properties"]
     if (!properties)

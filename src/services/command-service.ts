@@ -1,5 +1,5 @@
 import { BaseMessageOptions, Client, EmbedBuilder, Events, GatewayIntentBits, Guild, GuildChannel, GuildMember, Message, MessageCreateOptions, MessagePayload, MessageReplyOptions, PermissionResolvable, PermissionsBitField, TextBasedChannel, TextChannel, User } from "discord.js";
-import { BotService, ServiceManager, autoRegister, dependency, discordEventHandler, providedBy, provides } from "../services";
+import { BotService, DependencyType, ServiceManager, autoRegister, dependency, discordEventHandler, providedBy, provides } from "../services";
 import { Parser, StringReader, Parsers as ParsersBase, stringify, StringLoc, ParseError, EOS, ParseContext, epochTimeToSMS, UNTIL_NEWLN, StringBuilder, ParseResult, newSyncParser, newAsyncParser } from "../util/strings";
 import { Optional } from "../util/optional";
 import { Logger } from "util/logging";
@@ -679,7 +679,7 @@ function toErrorResult(ctx: CommandContext, res: ParseResult<any>): FailLikeResu
 }
 
 /** The command dispatcher */
-@providedBy("CommandService", "service")
+@providedBy("CommandService", DependencyType.SERVICE)
 export class CommandDispatcher {
     commandMap: Map<string, CommandNode> = new Map() // All registered prefix + aliases mapped to their respective commands
     commands: CommandNode[] = []                     // A list of all registered commands

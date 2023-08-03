@@ -1,6 +1,7 @@
 # node.js
 /node_modules
 /build
+/dist
 
 # data and configuration
 /data

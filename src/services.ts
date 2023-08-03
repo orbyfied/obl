@@ -20,14 +20,98 @@ import { ClientEvents } from "discord.js";
 import { Logger } from "./util/logging";
 import 'reflect-metadata'
 import './util/reflect'
-import { getSuperClasses, getPrototypeName, isOfType, getClassChain } from "./util/reflect";
+import { getPrototypeName, isOfType, getClassChain } from "./util/reflect";
 import { Future } from "./util/future";
-import { Optional } from "./util/optional";
+import { EventEmitter } from "events";
+
+// Helper for dependency type names
+export enum DependencyType {
+    SERVICE = "services",
+    SERVICES = "services",
+    MODULE = "modules",
+    MODULES = "modules",
+    SINGLETON = "singletons",
+    SINGLETONS = "singletons"
+}
 
 const logger: Logger = new Logger("ServiceManager")
 
 function callOnAll(entries: object, f: Function) {
     Object.entries(entries).forEach(e => f(e[1]))
+}
+
+/** Signals an unresolved dependency */
+class _UNRESOLVED {
+    toString() {
+        return "UNRESOLVED"
+    }
+}
+
+export const UNRESOLVED = new _UNRESOLVED()
+
+/** Represents a provider of a dependency */
+export abstract class DependencyProvider<T> {
+    constructor(name: string) {
+        this.name = name
+    }
+
+    public readonly name: string // The name of this resolver
+
+    public abstract findDependency(name: string): T
+    public abstract addDependency(name: string, value: T)
+}
+
+/** Nested document dependency resolver */
+export function nestedDocumentDependencyProvider(name: string, docSupplier: (() => any) | any, list?: any[],
+        vSet: (on: any, k: string, v: any) => void = (o, k, v) => o[k] = v, vGet: (on: any, k: string) => void = (o, k) => o[k],
+        vNew: () => any = () => { }): 
+        DependencyProvider<any> {
+
+    const getDoc = () => {
+        let doc: any = docSupplier
+        if (typeof doc == 'function')
+            doc = doc()
+        return doc
+    }
+
+    return new class extends DependencyProvider<any> {
+        public findDependency(name: string) {
+            let split = name.split(".")
+            let current = getDoc()
+            for (let i = 0; i < split.length; i++) {
+                let part = split[i]
+
+                // get next document
+                current = vGet(current, part)
+                if (current == null || current == undefined) {
+                    return current
+                }
+            }
+
+            return current
+        }
+
+        public addDependency(name: string, value: any) {
+            if (list)
+                list.push(value)
+
+            let current = getDoc()
+            let split = name.split(".")
+            for (let i = 0; i < split.length - 1; i++) {
+                let part = split[i]
+
+                // get next document
+                let old = current
+                current = vGet(current, part)
+                if (current == null || current == undefined) {
+                    current = vNew()
+                    vSet(old, part, current)
+                }
+            }
+
+            vSet(current, split[split.length - 1], value)
+        }
+    } (name)
 }
 
 /** Get the dependency/service name for the given type. */
@@ -36,14 +120,14 @@ export function getDependencyNameForPrototype(type: object) {
 }
 
 /** Derive the dependency/service name from the given key */
-export function getDependencyNameForKey(key: string | object) {
+export function getDependencyNameForKey(key: string | object, k2?: string) {
     if (typeof key == 'string')
-        return key
-    return getDependencyNameForPrototype(key) // Get from prototype
+        return key + (k2 ? ":" + k2 : "")
+    return getDependencyNameForPrototype(key) + (k2 ? ":" + k2 : "") // Get from prototype
 }
 
 /** Derive the dependency type from the given key */
-export function getDependencyTypeForKey(key: string | object, def: string = "") {
+export function estimateDependencyProvider(key: string | object, def: string = ""): string {
     if (typeof key == 'string') {
         // check extension
         key = key.toLowerCase()
@@ -62,74 +146,131 @@ export interface Keyed<K> {
     key(): K
 }
 
+// All events the service manager may emit
+export interface ServiceManagerEvents {
+    preLoad: [ServiceManager]
+    load: [ServiceManager]
+    postLoad: [ServiceManager]
+    preReady: [ServiceManager]
+    ready: [ServiceManager]
+}
+
 /** Central manager class. */
-export class ServiceManager {
-    private static INSTANCE
+export class ServiceManager extends EventEmitter {
     public static get(): ServiceManager {
-        return this.INSTANCE
+        return serviceManager
     }
 
     constructor() {
-        ServiceManager.INSTANCE = this
+        super()
+        this.eventBus = new EventBus()
 
         this.services = { }
         this.modules = { }
         this.singletons = { }
+
+        this.addDependencyProvider(nestedDocumentDependencyProvider("services", this.services, this.servicesList))
+        this.addDependencyProvider(nestedDocumentDependencyProvider("modules", this.modules, this.modulesList))
+        this.addDependencyProvider(nestedDocumentDependencyProvider("singletons", this.singletons))
     }
 
-    eventBus: EventBus = new EventBus() // The main event bus
+    eventBus: EventBus                                                    // The main event bus
 
-    services: Object                    // All services by name
-    serviceList: BotService[] = []      // All services in an array
-    modules: Object                     // All modules by name
-    moduleList: BotModule[] = []        // All modules in an array
-    singletons: Object                  // Singleton Map for dependency injection
+    dependencyProviders: Map<string, DependencyProvider<any>> = new Map() // All dependency providers by name
+    services: Object                                                      // All services by name
+    servicesList: BotService[] = []                                       // All services in an array
+    modules: Object                                                       // All modules by name
+    modulesList: BotModule[] = []                                         // All modules in an array
+    singletons: Object                                                    // Singleton Map for dependency injection
 
-    gInjectCtx: InjectContext           // The injection context for the global variables
+    gInjectCtx: InjectContext                                             // The injection context for the global variables
 
-    getService(key: string | object) {
-        return this.services[getDependencyNameForKey(key)]
+    getService(key: string | object, k2?: string) {
+        return this.services[getDependencyNameForKey(key, k2)]
     }
 
-    getModule(key: string | object) {
-        return this.modules[getDependencyNameForKey(key)]
+    getModule(key: string | object, k2?: string) {
+        return this.modules[getDependencyNameForKey(key, k2)]
     }
 
-    getSingleton(key: string | object) {
-        return this.singletons[getDependencyNameForKey(key)]
+    getSingleton(key: string | object, k2?: string) {
+        return this.singletons[getDependencyNameForKey(key, k2)]
     }
-
-    addModule(module: BotModule): ServiceManager {
+    
+    /** Register a module to the service manager */
+    public addModule(module: BotModule): ServiceManager {
         this.modules[module.name] = module;
-        this.moduleList.push(module)
+        this.modulesList.push(module)
         return this
     }
 
-    addService(service: BotService): ServiceManager {
+    /** Register a service to the service manager */
+    public addService(service: BotService): ServiceManager {
         this.services[service.name] = service;
-        this.serviceList.push(service)
+        this.servicesList.push(service)
         return this
     }
 
-    addSingleton(singleton: object): ServiceManager {
+    /** Register a new singleton */
+    public addSingleton(singleton: object, k2?: string): ServiceManager {
         if (!singleton)
             return
+        if (typeof singleton != 'object') {
+            this.singletons[getDependencyNameForKey(typeof singleton, k2)] = singleton
+            return this
+        }
+
         getClassChain(Object.getPrototypeOf(singleton)).forEach(p => {
-            this.singletons[getDependencyNameForPrototype(p)] = singleton
+            this.singletons[getDependencyNameForKey(p, k2)] = singleton
         })
+
         return this
     }
 
-    allServices(): BotService[] {
-        return this.serviceList
+    /** Get the dependency under the given provider and key */
+    public getDependency<T>(provider: string, key: string): T {
+        let p = this.getDependencyProvider(provider)
+        if (!p) {
+            console.log("couldnt find provider for .getDependency(" + key + "): ", provider)
+            return undefined
+        }
+
+        return p.findDependency(key)
     }
 
-    allModules(): BotModule[] {
-        return this.moduleList
+    /** Register the given dependency under the given provider and key */
+    public addDependency(provider: string, key: string, value: any) {
+        let p = this.getDependencyProvider(provider)
+        if (!p) {
+            console.log("couldnt find provider for .addDependency(" + key + "): ", provider)
+            return undefined
+        }
+
+        p.addDependency(key, value)
+    }
+
+    /** Register a dependency provider by a specific name */
+    public addDependencyProvider(provider: DependencyProvider<any>) {
+        this.dependencyProviders.set(provider.name, provider)
+    }
+
+    /** Get the dependency provider by the given name */
+    public getDependencyProvider(name: string): DependencyProvider<any> {
+        return this.dependencyProviders.get(name)
+    }
+
+    /** Get a list of all registered services */
+    public allServices(): BotService[] {
+        return this.servicesList
+    }
+
+    /** Get a list of all registered modules */
+    public allModules(): BotModule[] {
+        return this.modulesList
     }
 
     /** Register all autoRegister annotated elements */
-    autoRegisterAll() {
+    public autoRegisterAll() {
         let list = global["___auto_register"]
         if (list == undefined)
             return
@@ -149,74 +290,54 @@ export class ServiceManager {
                     type = "singleton"
                 }
             }
-            
-            let map = this[type]
-            if (map == undefined)
-                return
 
-            map[instance["name"]] = instance
+            this.addDependency(type, instance["name"], instance)
         })
     }
 
     /** On load, load everything */
     loadAll() {
-        this.serviceList.forEach(s => s.load(this))
-        this.moduleList.forEach(s => s.load(this))
+        this.emit('preLoad', this)
+        this.servicesList.forEach(s => s.load(this))
+        this.modulesList.forEach(s => s.load(this))
         injectDependencies(global, this, InjectStage.Load, this.gInjectCtx = new InjectContext()) 
+        this.emit('load', this)
 
         // post load
-        this.serviceList.forEach(s => s.postLoad(this))
-        this.moduleList.forEach(s => s.postLoad(this))
+        this.servicesList.forEach(s => s.postLoad(this))
+        this.modulesList.forEach(s => s.postLoad(this))
         injectDependencies(global, this, InjectStage.PostLoad, this.gInjectCtx = new InjectContext()) 
+        this.emit('postLoad', this)
     }
 
     /** On ready, ready everything */
     readyAll() {
-        this.serviceList.forEach(s => s.ready(this))
-        this.moduleList.forEach(s => s.ready(this))
+        this.emit('preReady', this)
+        this.servicesList.forEach(s => s.ready(this))
+        this.modulesList.forEach(s => s.ready(this))
         injectDependencies(global, this, InjectStage.Ready, this.gInjectCtx = new InjectContext()) 
+        this.emit('ready', this)
     }
+
+    /* EventEmitter helper */
+    public on<K extends keyof ServiceManagerEvents>(event: K, listener: (...args: ServiceManagerEvents[K]) => void): this { return super.on(event, listener);  }
+    public once<K extends keyof ServiceManagerEvents>(event: K, listener: (...args: ServiceManagerEvents[K]) => void): this { return super.once(event, listener);  }
+
 }
 
 /* ----------------- Dependency Injection ----------------- */
 
 /** Tries to resolve the dependency instance from the given manager */
-function resolveDependency(types: string, name: string, manager: ServiceManager) {
-    let split = types.split("|")
-    let fDep  = null
-    split.forEach(type => {
-        // get the registry
-        let map = manager[type]
-        if (!map)
-            map = manager[type + "s"]
-        if (!map)
-            return
-        
-        let dep = map[name]
-        if (dep)
-            fDep = dep
-    })
-
-    return fDep
+function resolveDependency(providerName: string, name: string, manager: ServiceManager): any {
+    return manager.getDependency(providerName, name)
 }
 
 /** Invokes the loading of the given dependency if it is loadable */
 function loadDependency(dep: Object, manager: ServiceManager) {
     if (dep["loaded"] == undefined || dep["load"] == undefined) // not loadable
         return
-
     dep["load"](manager) // invoke load
 }
-
-/** Signals an unresolved dependency */
-class _UNRESOLVED {
-    toString() {
-        return "UNRESOLVED"
-    }
-}
-
-/** Signals an unresolved dependency */
-export const UNRESOLVED = new _UNRESOLVED()
 
 class InjectContext {
     warnings: Map<object, string> = new Map()
@@ -236,8 +357,9 @@ function injectDependencies(instance: Object, manager: ServiceManager, stage: st
         return // nothing to inject
 
     dependencies.forEach(dependency => {
+        let provider: string      = dependency["provider"]
         let key: object           = dependency["key"]
-        let type: string          = dependency["type"]
+        let k2: string            = dependency["k2"]
         let name: string          = dependency["name"]
         let property: string      = dependency["property"]
         let expectedStage: string = dependency["stage"]
@@ -247,17 +369,16 @@ function injectDependencies(instance: Object, manager: ServiceManager, stage: st
         if (current && current != UNRESOLVED)
             return
 
-        let dependencyValue = _UNRESOLVED
+        let dependencyValue = UNRESOLVED
 
         // check if the dependency is provided by a provider
         if (key["___provided_by"]) {
-            let { providerName, providerType } = key["___provided_by"]
+            let { providerName, providerProvider } = key["___provided_by"]
 
             // resolve provider dependency
-            let provider = resolveDependency(providerType, providerName, manager)
+            let provider = resolveDependency(providerProvider, providerName, manager)
             let ppt: any
             if (!provider || !(ppt = Object.getPrototypeOf(provider))["___provides"]) {
-                console.log(ppt)
                 return
             }
 
@@ -272,9 +393,9 @@ function injectDependencies(instance: Object, manager: ServiceManager, stage: st
             let propertyKey = pInfo.propertyKey
             dependencyValue = provider[propertyKey]
         } else {
-            dependencyValue = resolveDependency(type, name, manager)
+            dependencyValue = resolveDependency(provider, name + (k2 ? ":" + k2 : ""), manager)
             if (!dependencyValue) {
-                const warning = "Could not resolve dependency(name: " + name + ", type: " + type + ") for object(.name: " + instance["name"] + ") " +
+                const warning = "Could not resolve dependency(name: " + name + ", provider: " + provider + ") for object(.name: " + instance["name"] + ") " +
                     "atStage(" + stage + ")" + (expectedStage ? " expectedAt(" + expectedStage + ")" : "")
                 
                 // log immediately as it was expected here
@@ -309,13 +430,33 @@ export class InjectStage {
     static Ready:    string = "ready"
 }
 
+/** Creates a key pair */
+export function k2(key: string | object, k2?: string) {
+    return { key: key, k2: k2 }
+}
+
 /**
  * Decorator: @dependency for fields
  */
-export function dependency(key: string | object, stage: string = null, type: string = null) {
+export function dependency(key: string | object, stage: string = null, provider: string = null) {
     return function(target: Object, propertyKey: string) {
+        // extract key pair from the key
+        let k2 = undefined
+        if (key["k2"]) {
+            k2 = key["k2"]
+            key = key["key"]
+        }
+
+        // get name and type from the key
         let name = getDependencyNameForKey(key)
-        type = type ? type : getDependencyTypeForKey(key, "services|singletons")
+        let provider: string
+        let idxOfSlash: number = name.indexOf("/")
+        if (idxOfSlash != -1) {
+            provider = name.split('/')[0]
+            name = name.substring(idxOfSlash + 1)
+        } else {
+            provider = provider ? provider : estimateDependencyProvider(key, "services|singletons")
+        }
 
         // get dependency list
         let list = target["___dependencies"] as any[]
@@ -323,8 +464,9 @@ export function dependency(key: string | object, stage: string = null, type: str
 
         // add dependency
         list.push({
+            "provider": provider,
             "key": key,
-            "type": type,
+            "k2": k2,
             "name": name,
             "property" : propertyKey,
             "stage": stage
@@ -348,12 +490,12 @@ export function autoRegister(type: string = null) {
 /** Denotes that the singleton type is provided by the given prototype */
 export function providedBy(key: string | object, type: string = undefined) {
     let name = getDependencyNameForKey(key)
-    type = type || getDependencyTypeForKey(key)
+    let provider = type ? type : estimateDependencyProvider(key)
     return (classConstructor: Function) => {
         // register property
         classConstructor["___provided_by"] = {
             providerName: name,
-            providerType: type
+            providerProvider: provider
         }
     }
 }
@@ -740,3 +882,5 @@ export function registerListeners(instance: object, eventBus: EventBus) {
 export function discordEventHandler(event: keyof ClientEvents, priority: number = 0, delay: number = -1) {
     return eventHandler("@discord." + event, priority, delay)
 }
+
+export const serviceManager: ServiceManager = new ServiceManager()

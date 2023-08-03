@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, GuildMember, Role } from "discord.js"
-import { BotService, InjectStage, ServiceManager, autoRegister, dependency, discordEventHandler, eventHandler, providedBy, provides } from "../services"
+import { BotService, DependencyType, InjectStage, ServiceManager, autoRegister, dependency, discordEventHandler, eventHandler, providedBy, provides } from "../services"
 import { Result, pcallAsync } from "../util/result"
 import { DataIO, fileJsonIO } from "../util/io"
 
@@ -331,7 +331,7 @@ function memberPermissibleKey(member: GuildMember): string {
 }
 
 /** The manager of all permission related data */
-@providedBy("PermissionService", "service")
+@providedBy("PermissionService", DependencyType.SERVICE)
 export class PermissionManager {
     private static INSTANCE: PermissionManager
     public static get(): PermissionManager {

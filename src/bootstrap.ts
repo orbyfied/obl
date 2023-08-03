@@ -1,10 +1,13 @@
 /* Operational Imports */
-import { Client, ClientOptions, GatewayIntentBits } from "discord.js"
+import { Client, ClientEvents, ClientOptions, GatewayIntentBits } from "discord.js"
 import { Logger } from './util/logging';
 import { EventBus, ServiceManager } from "./services";
 import { openConsole } from './console';
 import { resolvePath } from "./util/paths";
 import { DatabaseProvider } from "./services/db-service";
+import { EventEmitter } from "events";
+import { listenOnEmitter } from "./util/functional";
+import { getid } from "./util/debug";
 
 const path = require("path")
 const fs = require("fs")
@@ -21,12 +24,12 @@ const DEFAULT_OPTIONS: BootstrapOptions = {
 }
 
 /** Bootstrapper class */
-export class OBLBootstrap {
+export class OBLBootstrap extends EventEmitter {
 
     readonly options: BootstrapOptions
 
     /** The service manager instance */
-    public readonly serviceManager: ServiceManager = new ServiceManager()
+    public readonly serviceManager: ServiceManager = ServiceManager.get()
 
     /** The event bus from the service manager */
     public readonly eventBus: EventBus = this.serviceManager.eventBus
@@ -37,6 +40,7 @@ export class OBLBootstrap {
     private currentPromise: Promise<any> = Promise.resolve() // The current promise being awaited
 
     constructor(options: BootstrapOptions) {
+        super()
         this.options = options
 
         // set autosave interval
@@ -65,23 +69,28 @@ export class OBLBootstrap {
     public requireAll(dir: string): this {
         dir = resolvePath(dir)
         if (!fs.existsSync(dir))
-            return
+            return this
 
         fs.readdirSync(dir).forEach(fn => {
             let pathStr = path.join(dir, fn)
 
             // check extension
-            if (fn.endsWith(".js") || fn.endsWith(".ts")) {
+            if (!fn.endsWith(".d.ts") && (fn.endsWith(".js") || fn.endsWith(".ts"))) {
                 require(pathStr.replace(".ts", "").replace(".js", ""))
             }
 
             // check for dir
             if (fs.lstatSync(pathStr).isDirectory()) {
-                this.requireAll(dir)
+                this.requireAll(pathStr)
             }
         })
 
         return this
+    }
+
+    private emitOnBus(event: string, args: any[]) {
+        this.eventBus.call(event, args)
+        this.emit(event, ...args)
     }
 
     /** Create the client instance */
@@ -95,14 +104,15 @@ export class OBLBootstrap {
             if (!options)
                 options = { intents: [] }
             requiredIntents.forEach(b => options.intents["push"](b))
-            console.log(options.intents)
             this.client = new Client(options)
+            this.serviceManager.addSingleton(this.client)
+            listenOnEmitter(this.client, (name, args) => this.emit(name, args))
             this.client.once('ready', _ => {
                 logger.info("Connected to Discord as user({0}) userId({1})", this.client.user.username, this.client.user.id);
 
-                this.eventBus.call("preReady", [this.client])
+                this.emitOnBus("preReady", [this.client])
                 this.onReady()
-                this.eventBus.call("postReady", [this.client])
+                this.emitOnBus("postReady", [this.client])
             })
 
             // add discord.js event calls to event bus
@@ -152,9 +162,11 @@ export class OBLBootstrap {
 
     // Connect a new handler to the startup promise chain
     then<TResult1>(onfulfilled?: ((value: OBLBootstrap) => TResult1 | PromiseLike<TResult1>) | undefined | null, stage?: string): this {
-        this.currentPromise = this.currentPromise
-            .then(_ => onfulfilled(this))
-            .catch(e => logger.error("A fatal error occured in {0}: {1} \x1b[41m\x1b[31m[TERMINATING]\x1b[0m", stage ? stage : "startup", e))
+        this.currentPromise = new Promise((res, rej) => { 
+            this.currentPromise
+                .then(_ => res(onfulfilled(this)))
+                .catch(e => { logger.error("A fatal error occured in {0}: {1} \x1b[41m\x1b[31m[TERMINATING]\x1b[0m", stage ? stage : "startup", e); res(undefined) })
+        })
         return this
     }
 
@@ -162,6 +174,10 @@ export class OBLBootstrap {
     public promise(): Promise<OBLBootstrap> {
         return this.currentPromise.then(_ => this)
     }
+
+    /* EventEmitter helper */
+    public on<K extends keyof ClientEvents>(event: string | symbol | K, listener: (...args: ClientEvents[K]) => void): this { return super.on(event, listener);  }
+    public once<K extends keyof ClientEvents>(event: string | symbol | K, listener: (...args: ClientEvents[K]) => void): this { return super.once(event, listener);  }
 
 }
 

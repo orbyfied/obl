@@ -1,4 +1,4 @@
-import { DatabaseProvider, Database, Table, DeleteResult, Acknowledgable, UpdateOptions, UpdateResult, bsonDocumentDirectMap } from '../db-service'
+import { DatabaseProvider, Database, Table, DeleteResult, Acknowledgable, UpdateOptions, UpdateResult, documentDirectMap } from '../db-service'
 import { MongoClient, Collection, Filter, Db } from 'mongodb'
 import { Document } from "bson";
 
@@ -113,6 +113,6 @@ export class MongoTable extends Table<Document> {
     }
 
     defaultSchemaFor(proto: object, factory: () => any) {
-        return bsonDocumentDirectMap(proto, factory)
+        return documentDirectMap(proto, factory)
     }
 }

@@ -1,9 +1,8 @@
-import { BotService, ServiceManager, autoRegister, dependency, eventHandler, providedBy, provides } from "../services";
+import { BotService, DependencyType, ServiceManager, autoRegister, dependency, eventHandler, providedBy, provides, serviceManager } from "../services";
 import { CommandService } from "./command-service";
 import { DataIO, fileJsonIO } from "../util/io";
 import { Channel, Client, ClientEvents, EmbedBuilder, Emoji, EmojiIdentifierResolvable, EmojiResolvable, GatewayIntentBits, Guild, GuildMember, Message, MessageReaction, PartialMessage, PartialMessageReaction, ReactionEmoji, Role, TextBasedChannel, User } from "discord.js";
 import { Logger } from "../util/logging";
-import { requiresDiscordIntents } from "../bootstrap";
 
 /** Context for serializing interaction components */
 export interface InteractionSerializationLogic {
@@ -270,9 +269,9 @@ export class Interaction<E> {
     persistent: boolean                        // Whether this interaction should be saved and loaded
 
     lifetime: InteractionLifetime              // The lifetime of the interaction
-    triggers: Trigger<any>          // The trigger which causes this interaction to be executed
-    conditions: Condition<E>[] = [] // The conditions for the event to go through
-    actions: Action<E>[] = []       // The actions to be executed when this interaction is called
+    triggers: Trigger<any>                     // The trigger which causes this interaction to be executed
+    conditions: Condition<E>[] = []            // The conditions for the event to go through
+    actions: Action<E>[] = []                  // The actions to be executed when this interaction is called
     meta: any = { } as any                     // The metadata on this interaction
 
     /** Triggers this interaction with the given context */
@@ -379,7 +378,7 @@ export class Interaction<E> {
 }
 
 /** The manager of all interactions */
-@providedBy("InteractionService", "service")
+@providedBy("InteractionService", DependencyType.SERVICE)
 export class InteractionManager {
     // THE instance
     static readonly INSTANCE: InteractionManager = new InteractionManager()
@@ -581,10 +580,12 @@ function registerBaseComponent<T extends InteractionComponent>(v: T): T {
 function createDiscordEventTrigger<K extends keyof ClientEvents, M>(event: K, mapper: (...args: ClientEvents[K]) => M): Trigger<M> {
     // listener logic
     let listeners = []
-    let client: Client = ServiceManager.get().getSingleton(Client)
-    client.on(event, (...args) => {
-        let mapped = mapper(...args)
-        listeners.forEach(l => l.interaction.trigger(mapped))
+    serviceManager.on('preLoad', _ => {
+        let client: Client = serviceManager.getSingleton(Client)
+        client.on(event, (...args) => {
+            let mapped = mapper(...args)
+            listeners.forEach(l => l.interaction.trigger(mapped))
+        })
     })
 
     // create trigger

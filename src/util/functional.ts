@@ -1,3 +1,5 @@
+import { EventEmitter } from "events"
+
 /** Subscribe to the given function if it's subscribable
  *  Returns the listener object */
 export function subscribe(func: Function, handler: (...args) => void): any {
@@ -102,3 +104,20 @@ export class AsyncQueue {
         return this.queue(op).then(r => r)
     }
 }
+
+/**
+ * Registers the given listener to listen to all events on the given
+ * emitter and forward them.
+ * 
+ * @param emitter The emitter.
+ * @param listener The listener.
+ */
+export function listenOnEmitter(emitter: EventEmitter, listener: (name: string, ...args: any[]) => void) {
+    var oldEmit = emitter.emit;
+  
+    emitter.emit = function() {
+        var emitArgs = arguments;
+        listener.apply(emitter, emitArgs)
+        return oldEmit.apply(emitter, arguments);
+    }
+  }
