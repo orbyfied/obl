@@ -506,6 +506,17 @@ export class CommandFlag {
     type: Parser<any>                             // The argument type of the flag
     defaultSupplier: (ctx: CommandContext) => any // The default value supplier (flags are always optional)
     isSwitch: boolean                             // Whether the flag is a switch
+    assertions: CommandAssertion[]                // The list of assertions for this node
+
+    public permissions(...perm: string[]): CommandFlag {
+        this.assertions.push(CommandAssertions.Permissions(...perm))
+        return this
+    }
+
+    public discordPermissions(...perm: PermissionResolvable[]): CommandFlag {
+        this.assertions.push(CommandAssertions.DiscordPermissions(...perm))
+        return this
+    }
 }
 
 export function flag(name: string, type: Parser<any>, def: any = undefined, aliases: string[] = []) {
@@ -757,8 +768,15 @@ export class CommandDispatcher {
                     let name = reader.collect(c => c != ' ')
                     let flag = ctx.registeredFlags.get(name)
                     if (!flag) {
-                        throw new CommandError(ctx, "No flag by alias `" + name + "`", 
-                            CommandErrorType.UNKNOWN_FLAG, new StringLoc(reader, ci, reader.idx - 1))
+                        return completedPromise(ctx.fail("No flag by alias `" + name + "`"))
+                    }
+
+                    // test flag assertions
+                    for (let a of flag.assertions) {
+                        let result = a.test(ctx)
+                        if (result.failed) {
+                            return completedPromise(new AssertionFailedResult(ctx, result.message, a))
+                        }
                     }
 
                     let value: any 
@@ -813,21 +831,19 @@ export class CommandDispatcher {
         let it: CommandNode = null // The selected node
 
         let reader = ctx.reader
+        reader.pushIndex()
+        let s = reader.collect(c => c != ' ')
+
         let children = currentNode.children
         for (let i = 0; i < children.length; i++) {
             let node = children[i]
 
             // check for literal
             if (node.literal) {
-                reader.pushIndex()
-                let s = reader.collect(c => c != ' ')
                 if (s == node.name) {
                     it = node
-                    reader.restore()
                     break
                 }
-
-                reader.restore()
             } else {
                 if (it == null || !it.literal) {
                     it = node
@@ -835,7 +851,12 @@ export class CommandDispatcher {
             }
         }
 
-        reader.skipWhitespace()
+        if (!it) {
+            reader.restore()
+        } else {
+            reader.skipWhitespace()
+        }
+
         return it
     }
 

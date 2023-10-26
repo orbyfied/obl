@@ -784,7 +784,7 @@ export class Conditions {
     public static readonly UserIsBot: Condition<IHasUser>
         = createSimpleCondition<IHasUser>("userIsBot", o => o.user.bot)
 
-    public static readonly IsSameMessage: Condition<IHasMessage>
+    public static readonly IsMessage: Condition<IHasMessage>
         = createParamCondition<IHasMessage, IdParam>("isMessage", (e, p) => e.message.id == p.id)
 
     public static readonly IsReactionEmoji: Condition<IHasReaction>
