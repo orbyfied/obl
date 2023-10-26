@@ -506,7 +506,7 @@ export class CommandFlag {
     type: Parser<any>                             // The argument type of the flag
     defaultSupplier: (ctx: CommandContext) => any // The default value supplier (flags are always optional)
     isSwitch: boolean                             // Whether the flag is a switch
-    assertions: CommandAssertion[]                // The list of assertions for this node
+    assertions: CommandAssertion[] = []           // The list of assertions for this node
 
     public permissions(...perm: string[]): CommandFlag {
         this.assertions.push(CommandAssertions.Permissions(...perm))
